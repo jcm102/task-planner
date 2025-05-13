@@ -1,5 +1,3 @@
-test
-
 import { ConfigDialog } from './ConfigDialog';
 import React, { useState, useEffect } from 'react';
 import {
