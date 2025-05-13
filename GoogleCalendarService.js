@@ -1,4 +1,3 @@
-
 import { googleLogout, useGoogleLogin } from '@react-oauth/google';
 import { useCallback } from 'react';
 
@@ -158,10 +157,9 @@ const useGoogleCalendarService = () => {
       console.error('Error deleting event:', error);
       throw error;
     }
-  };
+  });
 
-  return { login, logout, isLoggedIn, getEvents, createEvent, updateEvent, deleteEvent };
+  return { signIn, logout, isLoggedIn, getEvents, createEvent, updateEvent, deleteEvent };
 };
 
 export default useGoogleCalendarService;
-EOL
