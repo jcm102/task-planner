@@ -1,166 +1,206 @@
-// Task Planner Application
-import { googleLogout, useGoogleLogin } from '@react-oauth/google';
-import { useCallback } from 'react';
-
-const clientId = 'YOUR_GOOGLE_CLIENT_ID';
+import { useGoogleLogin } from '@react-oauth/google';
+import { useState } from 'react';
 
 const useGoogleCalendarService = () => {
-  const { signIn } = useGoogleLogin({
-    onSuccess: (credentialResponse) => {
-      console.log(credentialResponse);
-      localStorage.setItem('googleCredential', credentialResponse.credential);
+  const [accessToken, setAccessToken] = useState(localStorage.getItem('googleAccessToken'));
+
+  const login = useGoogleLogin({
+    onSuccess: (response) => {
+      console.log('Login Success:', response);
+      if (response.access_token) {
+        setAccessToken(response.access_token);
+        localStorage.setItem('googleAccessToken', response.access_token);
+        return response.access_token;
+      }
     },
     onError: (error) => {
-      console.log('Login Failed:', error);
+      console.error('Login Failed:', error);
+      setAccessToken(null);
+      localStorage.removeItem('googleAccessToken');
+      throw new Error('Failed to connect to Google Calendar');
     },
-    flow: 'auth-code',
-    scope: 'https://www.googleapis.com/auth/calendar.events',
-    clientId,
+    scope: 'https://www.googleapis.com/auth/calendar',
+    flow: 'implicit'
   });
 
-  const logout = useCallback(() => {
-    googleLogout();
-    localStorage.removeItem('googleCredential');
-  }, []);
+  const logout = () => {
+    setAccessToken(null);
+    localStorage.removeItem('googleAccessToken');
+  };
 
-  const isLoggedIn = useCallback(() => {
-    return !!localStorage.getItem('googleCredential');
-  }, []);
+  const isLoggedIn = () => {
+    return !!accessToken;
+  };
 
-  const getEvents = useCallback(async (start, end) => {
-    try {
-      const credential = localStorage.getItem('googleCredential');
-      if (!credential) {
-        throw new Error('No credentials found. Please log in.');
-      }
+const getEvents = async (start, end) => {
+  const token = accessToken || localStorage.getItem('googleAccessToken');
+  if (!token) {
+    throw new Error('Not authenticated');
+  }
 
-      const response = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${start.toISOString()}&timeMax=${end.toISOString()}&access_token=${credential}`,
-        {
-          headers: {
-            Authorization: `Bearer ${credential}`
-          }
+  try {
+    const response = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/primary/events?` + 
+      `timeMin=${start.toISOString()}&` +
+      `timeMax=${end.toISOString()}&` +
+      `singleEvents=true&` +
+      `orderBy=startTime`,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         }
-      );
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
       }
+    );
 
-      const data = await response.json();
-      return data.items || [];
-    } catch (error) {
-      console.error('Error fetching events:', error);
-      throw error;
+    if (!response.ok) {
+      if (response.status === 401) {
+        logout();
+        throw new Error('Authentication expired. Please reconnect to Google Calendar.');
+      }
+      const error = await response.json();
+      throw new Error(error.error?.message || 'Failed to fetch events');
     }
-  }, []);
 
-  const createEvent = useCallback(async (event) => {
-    try {
-      const credential = localStorage.getItem('googleCredential');
-      if (!credential) {
-        throw new Error('No credentials found. Please log in.');
-      }
+    const data = await response.json();
+    console.log('Fetched Google Calendar events:', data.items); // Debug log
 
-      const response = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/primary/events?access_token=${credential}`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${credential}`,
-            'Content-Type': 'application/json'
+    return data.items
+      .filter(event => event.start?.dateTime && event.end?.dateTime) // Only include events with times
+      .map(event => ({
+        id: event.id,
+        title: event.summary || 'Untitled Event',
+        start: new Date(event.start.dateTime),
+        end: new Date(event.end.dateTime),
+        googleEventId: event.id,
+        isExternalEvent: true,
+        backgroundColor: '#808080', // Gray color for external events
+        editable: false // Make external events non-editable
+      }));
+  } catch (error) {
+    console.error('Error fetching Google Calendar events:', error);
+    throw error;
+  }
+};
+
+  const createEvent = async (event) => {
+    const token = accessToken || localStorage.getItem('googleAccessToken');
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    const response = await fetch(
+      'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          summary: event.title,
+          start: {
+            dateTime: event.start.toISOString(),
+            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
           },
-          body: JSON.stringify({
-            summary: event.title,
-            start: {
-              dateTime: event.start.toISOString()
-            },
-            end: {
-              dateTime: event.start.toISOString()
-            }
-          })
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      return data.id;
-    } catch (error) {
-      console.error('Error creating event:', error);
-      throw error;
-    }
-  }, []);
-
-  const updateEvent = useCallback(async (event) => {
-    try {
-      const credential = localStorage.getItem('googleCredential');
-      if (!credential) {
-        throw new Error('No credentials found. Please log in.');
-      }
-
-      const response = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/primary/events/${event.googleEventId}?access_token=${credential}`,
-        {
-          method: 'PUT',
-          headers: {
-            Authorization: `Bearer ${credential}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            summary: event.title,
-            start: {
-              dateTime: event.start.toISOString()
-            },
-            end: {
-              dateTime: event.end.toISOString()
-            }
-          })
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return true;
-    } catch (error) {
-      console.error('Error updating event:', error);
-      throw error;
-    }
-  }, []);
-
-  const deleteEvent = useCallback(async (eventId) => {
-    try {
-      const credential = localStorage.getItem('googleCredential');
-      if (!credential) {
-        throw new Error('No credentials found. Please log in.');
-      }
-
-      const response = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}?access_token=${credential}`,
-        {
-          method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${credential}`
+          end: {
+            dateTime: event.end.toISOString(),
+            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
           }
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        })
       }
+    );
 
-      return true;
-    } catch (error) {
-      console.error('Error deleting event:', error);
-      throw error;
+    if (!response.ok) {
+      if (response.status === 401) {
+        logout();
+        throw new Error('Authentication expired. Please reconnect to Google Calendar.');
+      }
+      const error = await response.json();
+      throw new Error(error.error?.message || 'Failed to create event');
     }
-  });
 
-  return { signIn, logout, isLoggedIn, getEvents, createEvent, updateEvent, deleteEvent };
+    const data = await response.json();
+    return data.id;
+  };
+
+  const updateEvent = async (event) => {
+    const token = accessToken || localStorage.getItem('googleAccessToken');
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    const response = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/primary/events/${event.googleEventId}`,
+      {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          summary: event.title,
+          start: {
+            dateTime: event.start.toISOString(),
+            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+          },
+          end: {
+            dateTime: event.end.toISOString(),
+            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+          }
+        })
+      }
+    );
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        logout();
+        throw new Error('Authentication expired. Please reconnect to Google Calendar.');
+      }
+      const error = await response.json();
+      throw new Error(error.error?.message || 'Failed to update event');
+    }
+
+    return true;
+  };
+
+  const deleteEvent = async (eventId) => {
+    const token = accessToken || localStorage.getItem('googleAccessToken');
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    const response = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`,
+      {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        }
+      }
+    );
+
+    if (!response.ok && response.status !== 410) {
+      if (response.status === 401) {
+        logout();
+        throw new Error('Authentication expired. Please reconnect to Google Calendar.');
+      }
+      const error = await response.json();
+      throw new Error(error.error?.message || 'Failed to delete event');
+    }
+
+    return true;
+  };
+
+  return {
+    login,
+    logout,
+    isLoggedIn,
+    getEvents,
+    createEvent,
+    updateEvent,
+    deleteEvent
+  };
 };
 
 export default useGoogleCalendarService;

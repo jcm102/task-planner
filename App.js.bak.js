@@ -106,55 +106,47 @@ function App() {
     localStorage.removeItem('isAuthenticated');
     setIsAuthenticated(false);
     logout(); // Also logout from Google Calendar
-    setEvents(prev => prev.filter(e => !e.googleEventId)); // Remove Google Calendar events
+    setEvents([]); // Clear events
   };
 
- const fetchInitialEvents = async () => {
-  try {
-    const start = new Date();
-    start.setDate(start.getDate() - 7); // Get events from a week ago
-    const end = new Date();
-    end.setDate(end.getDate() + 30); // Get events for next 30 days
-    
-    console.log('Fetching events from', start, 'to', end); // Debug log
-    
-    const googleEvents = await googleCalendarService.getEvents(start, end);
-    console.log('Fetched events:', googleEvents); // Debug log
-    
-    setEvents(prev => {
-      const localEvents = prev.filter(e => !e.isExternalEvent);
-      return [...localEvents, ...googleEvents];
-    });
-    
-    showNotification('Calendar events loaded successfully', 'success');
-  } catch (error) {
-    console.error('Failed to fetch initial events:', error);
-    showNotification('Failed to fetch calendar events: ' + error.message, 'error');
-  }
-};
+  const fetchInitialEvents = async () => {
+    try {
+      const start = new Date();
+      start.setDate(start.getDate() - 7);
+      const end = new Date();
+      end.setDate(end.getDate() + 30);
+      
+      const googleEvents = await googleCalendarService.getEvents(start, end);
+      setEvents(prev => {
+        const localEvents = prev.filter(e => !e.isExternalEvent);
+        return [...localEvents, ...googleEvents];
+      });
+    } catch (error) {
+      console.error('Failed to fetch initial events:', error);
+      showNotification('Failed to fetch calendar events', 'error');
+    }
+  };
 
-
-const handleConnect = async () => {
-  setIsConnecting(true);
-  try {
-    await login();
-    // Wait for token to be set
-    setTimeout(async () => {
-      if (isLoggedIn()) {
-        await fetchInitialEvents(); // Fetch events after successful login
-        showNotification('Successfully connected to Google Calendar', 'success');
-      } else {
-        throw new Error('Failed to connect to Google Calendar');
-      }
-    }, 1000);
-  } catch (error) {
-    console.error('Google Calendar connection error:', error);
-    showNotification(`Failed to connect: ${error.message}`, 'error');
-  } finally {
-    setIsConnecting(false);
-  }
-};
-
+  const handleConnect = async () => {
+    setIsConnecting(true);
+    try {
+      await login();
+      // Wait for token to be set
+      setTimeout(async () => {
+        if (isLoggedIn()) {
+          showNotification('Successfully connected to Google Calendar', 'success');
+          await fetchInitialEvents();
+        } else {
+          throw new Error('Failed to connect to Google Calendar');
+        }
+      }, 1000);
+    } catch (error) {
+      console.error('Google Calendar connection error:', error);
+      showNotification(`Failed to connect: ${error.message}`, 'error');
+    } finally {
+      setIsConnecting(false);
+    }
+  };
 
   const handleDisconnect = () => {
     logout();
